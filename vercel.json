@@ -1,0 +1,14 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "env": [
+    {
+      "key": "VITE_GROQ_API_KEY",
+      "description": "Your Groq API Key (get free at https://console.groq.com)",
+      "value": ""
+    }
+  ],
+  "framework": "vite",
+  "outputDirectory": "dist"
+}

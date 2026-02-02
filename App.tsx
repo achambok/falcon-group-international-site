@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GroqService } from './services/groq';
 
 // --- Utils ---
 /**
@@ -186,8 +186,8 @@ const AIAdvisor = () => {
   const startLiveSession = async () => {
     try {
       setError(null);
-      if (!import.meta.env.VITE_GEMINI_API_KEY) {
-        setError("API Key is missing in environment.");
+      if (!import.meta.env.VITE_GROQ_API_KEY) {
+        setError("Groq API Key is missing. Get your free key at https://console.groq.com and add it to .env");
         return;
       }
 
@@ -210,29 +210,14 @@ const AIAdvisor = () => {
       setError(null);
       setResponse("🔄 Processing your inquiry...");
       
-      // Log for debugging
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      console.log("API Key available:", !!apiKey);
-      console.log("API Key value:", apiKey ? apiKey.substring(0, 10) + "..." : "NOT AVAILABLE");
+      const groq = GroqService.getInstance();
+      const result = await groq.consultStrategy(inputText);
       
-      if (!apiKey) {
-        throw new Error("API Key is not configured. Please check your .env file.");
-      }
-      
-      const ai = new GoogleGenerativeAI({ apiKey });
-      const model = ai.getGenerativeModel({ 
-        model: 'gemini-2.5-flash',
-        systemInstruction: 'You are the Elite Strategic AI Advisor for Falcon Group International. Your role represents absolute authority, sophistication, and deep technical expertise. Answer inquiries about Cloud Infrastructure, Cyber Risk, and Digital Transformation with professional brevity and high-level strategic insight. Be concise and actionable.'
-      });
-
-      const result = await model.generateContent(inputText);
-      const text = result.response.text();
-      
-      setResponse(text);
+      setResponse(result);
       setInputText("");
     } catch (e: any) {
-      console.error("Gemini API Error:", e);
-      setError(e.message || "An error occurred during the consultation.");
+      console.error("Groq API Error:", e);
+      setError(e.message || "An error occurred during the consultation. Make sure you've added your Groq API key to .env");
       setIsLiveActive(false);
     }
   };
