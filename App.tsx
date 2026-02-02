@@ -176,6 +176,9 @@ const AIAdvisor = () => {
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<string>("");
   const [inputText, setInputText] = useState<string>("");
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState<any>(null);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
 
   const stopSession = () => {
     setIsLiveActive(false);
@@ -189,6 +192,37 @@ const AIAdvisor = () => {
       if (!import.meta.env.VITE_GROQ_API_KEY) {
         setError("Groq API Key is missing. Get your free key at https://console.groq.com and add it to .env");
         return;
+      }
+
+      // Initialize speech recognition
+      if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+        setIsSpeechSupported(true);
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const recognitionInstance = new SpeechRecognition();
+        recognitionInstance.continuous = false;
+        recognitionInstance.interimResults = false;
+        recognitionInstance.lang = 'en-US';
+
+        recognitionInstance.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setInputText(transcript);
+          setIsListening(false);
+        };
+
+        recognitionInstance.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionInstance.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+          setError('Speech recognition failed. Please try again.');
+        };
+
+        setRecognition(recognitionInstance);
+      } else {
+        setIsSpeechSupported(false);
+        console.log('Speech recognition not supported in this browser');
       }
 
       setIsLiveActive(true);
@@ -277,21 +311,75 @@ const AIAdvisor = () => {
              )}
 
              {isLiveActive && (
-               <div className="mb-6 flex gap-3">
-                 <input
-                   type="text"
-                   value={inputText}
-                   onChange={(e) => setInputText(e.target.value)}
-                   onKeyPress={(e) => e.key === 'Enter' && sendConsultationQuery()}
-                   placeholder="Ask your strategic question..."
-                   className="flex-1 bg-white/10 border border-gold-shiny/30 rounded-xl px-4 py-3 text-white placeholder-blue-300/50 text-sm focus:outline-none focus:border-gold-shiny transition-colors"
-                 />
-                 <button
-                   onClick={sendConsultationQuery}
-                   className="bg-gold-shiny text-navy px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-transform"
-                 >
-                   Send
-                 </button>
+               <div className="mb-6 space-y-4">
+                 <div className="flex gap-3">
+                   <input
+                     type="text"
+                     value={inputText}
+                     onChange={(e) => setInputText(e.target.value)}
+                     onKeyPress={(e) => e.key === 'Enter' && sendConsultationQuery()}
+                     placeholder="Ask your strategic question..."
+                     className="flex-1 bg-white/10 border border-gold-shiny/30 rounded-xl px-4 py-3 text-white placeholder-blue-300/50 text-sm focus:outline-none focus:border-gold-shiny transition-colors"
+                   />
+                   <button
+                     onClick={sendConsultationQuery}
+                     className="bg-gold-shiny text-navy px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-transform"
+                   >
+                     Send
+                   </button>
+                 </div>
+                 
+                 {/* Voice Input Button */}
+                 {isSpeechSupported && (
+                   <div className="flex gap-3">
+                     <button
+                       onClick={() => {
+                         if (recognition && !isListening) {
+                           setIsListening(true);
+                           recognition.start();
+                         }
+                       }}
+                       disabled={isListening}
+                       className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 ${
+                         isListening 
+                           ? 'bg-red-500 text-white animate-pulse' 
+                           : 'bg-blue-600 text-white hover:bg-blue-700'
+                       }`}
+                     >
+                       {isListening ? (
+                         <span className="flex items-center justify-center gap-2">
+                           <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
+                           Listening...
+                         </span>
+                       ) : (
+                         <span className="flex items-center justify-center gap-2">
+                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                           </svg>
+                           Voice Input
+                         </span>
+                       )}
+                     </button>
+                     
+                     <button
+                       onClick={() => {
+                         if (recognition && isListening) {
+                           recognition.stop();
+                         }
+                       }}
+                       disabled={!isListening}
+                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                     >
+                       Stop
+                     </button>
+                   </div>
+                 )}
+                 
+                 {!isSpeechSupported && (
+                   <p className="text-blue-300/50 text-xs text-center">
+                     Voice input not supported in this browser. Please use Chrome or Edge for speech recognition.
+                   </p>
+                 )}
                </div>
              )}
 
