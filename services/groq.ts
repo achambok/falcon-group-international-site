@@ -33,7 +33,7 @@ export class GroqService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'mixtral-8x7b-32768', // Fast, powerful free model
+          model: 'llama-3.1-70b-versatile', // Latest fast & powerful Groq model
           messages: [
             {
               role: 'system',
