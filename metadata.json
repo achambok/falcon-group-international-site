@@ -1,0 +1,9 @@
+
+{
+  "name": "Falcon Group International Brand Portal",
+  "description": "A high-end enterprise branding and consulting portal featuring AI-powered asset generation, strategy analysis, and live executive voice consultation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
