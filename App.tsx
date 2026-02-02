@@ -179,6 +179,10 @@ const AIAdvisor = () => {
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<any>(null);
   const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [synth, setSynth] = useState<any>(null);
+  const [email, setEmail] = useState<string>("");
+  const [showEmailForm, setShowEmailForm] = useState(false);
 
   const stopSession = () => {
     setIsLiveActive(false);
@@ -225,6 +229,12 @@ const AIAdvisor = () => {
         console.log('Speech recognition not supported in this browser');
       }
 
+      // Initialize speech synthesis for audio responses
+      if ('speechSynthesis' in window) {
+        const synthInstance = window.speechSynthesis;
+        setSynth(synthInstance);
+      }
+
       setIsLiveActive(true);
       setResponse("✓ Secure channel opened. Enter your consultation query below.");
     } catch (e: any) {
@@ -232,6 +242,79 @@ const AIAdvisor = () => {
       setError(e.message || "Could not start consultation session.");
       setIsLiveActive(false);
     }
+  };
+
+  const speakResponse = () => {
+    if (!synth || !response || isSpeaking) return;
+
+    // Cancel any existing speech
+    synth.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(response);
+    utterance.rate = 0.9; // Slightly slower for better comprehension
+    utterance.pitch = 1.1; // Slightly higher pitch for clarity
+    utterance.volume = 0.8;
+    
+    // Find a good voice
+    const voices = synth.getVoices();
+    const voice = voices.find(v => v.name.includes('Google') || v.name.includes('US')) || voices[0];
+    if (voice) {
+      utterance.voice = voice;
+    }
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setError('Audio response failed. Please try again.');
+    };
+
+    synth.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    if (synth) {
+      synth.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    try {
+      // Send email to administrator
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email,
+          subject: 'New Falcon Group International Sales Lead',
+          message: `New consultation request from: ${email}\n\nSession details:\nQuery: ${inputText}\nResponse: ${response}\n\nPlease follow up with this potential client.`,
+        }),
+      });
+
+      if (response.ok) {
+        setShowEmailForm(false);
+        setEmail('');
+        setResponse("Thank you! Your consultation has been completed. A member of our team will follow up shortly.");
+      } else {
+        setError("Failed to submit email. Please try again or contact us directly.");
+      }
+    } catch (error) {
+      console.error('Email submission error:', error);
+      setError("Network error. Please try again later.");
+    }
+  };
+
+  const requestEmailCopy = () => {
+    setShowEmailForm(true);
   };
 
   const sendConsultationQuery = async () => {
@@ -343,17 +426,17 @@ const AIAdvisor = () => {
                        className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 ${
                          isListening 
                            ? 'bg-red-500 text-white animate-pulse' 
-                           : 'bg-blue-600 text-white hover:bg-blue-700'
+                           : 'bg-gold-shiny text-navy hover:scale-105'
                        }`}
                      >
                        {isListening ? (
                          <span className="flex items-center justify-center gap-2">
-                           <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
+                           <div className="w-2 h-2 bg-navy rounded-full animate-bounce"></div>
                            Listening...
                          </span>
                        ) : (
                          <span className="flex items-center justify-center gap-2">
-                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <svg className="w-4 h-4 text-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                            </svg>
                            Voice Input
@@ -368,11 +451,58 @@ const AIAdvisor = () => {
                          }
                        }}
                        disabled={!isListening}
-                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
                      >
                        Stop
                      </button>
                    </div>
+                 )}
+                 
+                 {/* Audio Response Buttons */}
+                 {response && (
+                   <div className="flex gap-3">
+                     <button
+                       onClick={speakResponse}
+                       disabled={isSpeaking}
+                       className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 ${
+                         isSpeaking 
+                           ? 'bg-red-500 text-white animate-pulse' 
+                           : 'bg-gold-shiny text-navy hover:scale-105'
+                       }`}
+                     >
+                       {isSpeaking ? (
+                         <span className="flex items-center justify-center gap-2">
+                           <div className="w-2 h-2 bg-navy rounded-full animate-bounce"></div>
+                           Speaking...
+                         </span>
+                       ) : (
+                         <span className="flex items-center justify-center gap-2">
+                           <svg className="w-4 h-4 text-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828.001a6.977 6.977 0 010-9.899m-9.899 0a6.977 6.977 0 010 9.899m2.828-9.899a5 5 0 010 7.072" />
+                           </svg>
+                           Audio Response
+                         </span>
+                       )}
+                     </button>
+                     
+                     <button
+                       onClick={stopSpeaking}
+                       disabled={!isSpeaking}
+                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
+                     >
+                       Stop
+                     </button>
+                   </div>
+                 )}
+                 
+                 {/* Email Copy Button */}
+                 {response && (
+                   <button
+                     onClick={requestEmailCopy}
+                     className="w-full py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 transition-transform"
+                   >
+                     Request Email Copy
+                   </button>
                  )}
                  
                  {!isSpeechSupported && (
