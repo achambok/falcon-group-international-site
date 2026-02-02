@@ -182,12 +182,17 @@ const AIAdvisor = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [synth, setSynth] = useState<any>(null);
   const [email, setEmail] = useState<string>("");
+  const [phone, setPhone] = useState<string>("");
   const [showEmailForm, setShowEmailForm] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<'chat' | 'audio' | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<Array<{type: 'user' | 'ai', text: string}>>([]);
 
   const stopSession = () => {
     setIsLiveActive(false);
     setResponse("");
     setInputText("");
+    setConversationHistory([]);
+    setInteractionMode(null);
   };
 
   const startLiveSession = async () => {
@@ -207,10 +212,15 @@ const AIAdvisor = () => {
         recognitionInstance.interimResults = false;
         recognitionInstance.lang = 'en-US';
 
-        recognitionInstance.onresult = (event: any) => {
+        recognitionInstance.onresult = async (event: any) => {
           const transcript = event.results[0][0].transcript;
           setInputText(transcript);
           setIsListening(false);
+          
+          // In audio mode, automatically send the query
+          if (interactionMode === 'audio') {
+            await processAudioQuery(transcript);
+          }
         };
 
         recognitionInstance.onend = () => {
@@ -236,11 +246,77 @@ const AIAdvisor = () => {
       }
 
       setIsLiveActive(true);
-      setResponse("✓ Secure channel opened. Enter your consultation query below.");
+      setResponse("Welcome to Falcon Group International AI Consultation. Please select your preferred interaction mode below.");
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Could not start consultation session.");
       setIsLiveActive(false);
+    }
+  };
+
+  const selectInteractionMode = (mode: 'chat' | 'audio') => {
+    setInteractionMode(mode);
+    setResponse(mode === 'chat' 
+      ? "Chat mode selected. Type your strategic question below." 
+      : "Audio mode selected. Click the microphone to begin speaking."
+    );
+  };
+
+  const processAudioQuery = async (query: string) => {
+    if (!query.trim()) return;
+
+    try {
+      setError(null);
+      setResponse("🔄 Processing your inquiry...");
+      
+      const groq = GroqService.getInstance();
+      const result = await groq.consultStrategy(query);
+      
+      setResponse(result);
+      setConversationHistory(prev => [...prev, { type: 'user', text: query }, { type: 'ai', text: result }]);
+      
+      // Automatically speak the response in audio mode
+      setTimeout(() => {
+        if (synth && !isSpeaking) {
+          speakResponse();
+        }
+      }, 1000);
+      
+      setInputText("");
+    } catch (e: any) {
+      console.error("Groq API Error:", e);
+      setError(e.message || "An error occurred during the consultation. Make sure you've added your Groq API key to .env");
+      setIsLiveActive(false);
+    }
+  };
+
+  const sendConsultationQuery = async () => {
+    if (!inputText.trim()) {
+      setError("Please enter a consultation query.");
+      return;
+    }
+
+    try {
+      setError(null);
+      setResponse("🔄 Processing your inquiry...");
+      
+      const groq = GroqService.getInstance();
+      const result = await groq.consultStrategy(inputText);
+      
+      setResponse(result);
+      setConversationHistory(prev => [...prev, { type: 'user', text: inputText }, { type: 'ai', text: result }]);
+      setInputText("");
+    } catch (e: any) {
+      console.error("Groq API Error:", e);
+      setError(e.message || "An error occurred during the consultation. Make sure you've added your Groq API key to .env");
+      setIsLiveActive(false);
+    }
+  };
+
+  const startVoiceInput = () => {
+    if (recognition && !isListening && interactionMode === 'audio') {
+      setIsListening(true);
+      recognition.start();
     }
   };
 
@@ -263,7 +339,15 @@ const AIAdvisor = () => {
     }
 
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      // In audio mode, prompt for next input after response finishes
+      if (interactionMode === 'audio') {
+        setTimeout(() => {
+          setResponse("Your response has been delivered. Please speak your next question or say 'end session' to conclude.");
+        }, 1000);
+      }
+    };
     utterance.onerror = () => {
       setIsSpeaking(false);
       setError('Audio response failed. Please try again.');
@@ -279,10 +363,19 @@ const AIAdvisor = () => {
     }
   };
 
+  const endSessionWithSummary = () => {
+    const summary = conversationHistory
+      .map((item, index) => `${index + 1}. ${item.type === 'user' ? 'You' : 'AI'}: ${item.text}`)
+      .join('\n\n');
+    
+    setResponse(`Session Summary:\n\n${summary}\n\nPlease provide your contact information to receive this summary via email.`);
+    setShowEmailForm(true);
+  };
+
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      setError("Please enter your email address.");
+    if (!email && !phone) {
+      setError("Please provide either an email address or phone number.");
       return;
     }
 
@@ -295,17 +388,22 @@ const AIAdvisor = () => {
         },
         body: JSON.stringify({
           email: email,
+          phone: phone,
           subject: 'New Falcon Group International Sales Lead',
-          message: `New consultation request from: ${email}\n\nSession details:\nQuery: ${inputText}\nResponse: ${response}\n\nPlease follow up with this potential client.`,
+          message: `New consultation request from:\nEmail: ${email}\nPhone: ${phone}\n\nConversation Summary:\n${conversationHistory.map((item, index) => `${index + 1}. ${item.type === 'user' ? 'User' : 'AI'}: ${item.text}`).join('\n\n')}\n\nPlease follow up with this potential client.`,
         }),
       });
 
       if (response.ok) {
         setShowEmailForm(false);
         setEmail('');
-        setResponse("Thank you! Your consultation has been completed. A member of our team will follow up shortly.");
+        setPhone('');
+        setResponse("Thank you! Your consultation summary has been sent to your email/phone. A member of our team will follow up shortly.");
+        setTimeout(() => {
+          stopSession();
+        }, 3000);
       } else {
-        setError("Failed to submit email. Please try again or contact us directly.");
+        setError("Failed to submit contact information. Please try again or contact us directly.");
       }
     } catch (error) {
       console.error('Email submission error:', error);
@@ -314,29 +412,7 @@ const AIAdvisor = () => {
   };
 
   const requestEmailCopy = () => {
-    setShowEmailForm(true);
-  };
-
-  const sendConsultationQuery = async () => {
-    if (!inputText.trim()) {
-      setError("Please enter a consultation query.");
-      return;
-    }
-
-    try {
-      setError(null);
-      setResponse("🔄 Processing your inquiry...");
-      
-      const groq = GroqService.getInstance();
-      const result = await groq.consultStrategy(inputText);
-      
-      setResponse(result);
-      setInputText("");
-    } catch (e: any) {
-      console.error("Groq API Error:", e);
-      setError(e.message || "An error occurred during the consultation. Make sure you've added your Groq API key to .env");
-      setIsLiveActive(false);
-    }
+    endSessionWithSummary();
   };
 
   return (
@@ -395,103 +471,101 @@ const AIAdvisor = () => {
 
              {isLiveActive && (
                <div className="mb-6 space-y-4">
-                 <div className="flex gap-3">
-                   <input
-                     type="text"
-                     value={inputText}
-                     onChange={(e) => setInputText(e.target.value)}
-                     onKeyPress={(e) => e.key === 'Enter' && sendConsultationQuery()}
-                     placeholder="Ask your strategic question..."
-                     className="flex-1 bg-white/10 border border-gold-shiny/30 rounded-xl px-4 py-3 text-white placeholder-blue-300/50 text-sm focus:outline-none focus:border-gold-shiny transition-colors"
-                   />
-                   <button
-                     onClick={sendConsultationQuery}
-                     className="bg-gold-shiny text-navy px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-transform"
-                   >
-                     Send
-                   </button>
-                 </div>
-                 
-                 {/* Voice Input Button */}
-                 {isSpeechSupported && (
-                   <div className="flex gap-3">
+                 {/* Mode Selection */}
+                 {!interactionMode && (
+                   <div className="grid grid-cols-2 gap-4 mb-6">
                      <button
-                       onClick={() => {
-                         if (recognition && !isListening) {
-                           setIsListening(true);
-                           recognition.start();
-                         }
-                       }}
-                       disabled={isListening}
-                       className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 ${
-                         isListening 
-                           ? 'bg-red-500 text-white animate-pulse' 
-                           : 'bg-gold-shiny text-navy hover:scale-105'
-                       }`}
+                       onClick={() => selectInteractionMode('chat')}
+                       className="bg-gold-shiny text-navy px-6 py-4 rounded-xl font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
                      >
-                       {isListening ? (
-                         <span className="flex items-center justify-center gap-2">
-                           <div className="w-2 h-2 bg-navy rounded-full animate-bounce"></div>
-                           Listening...
-                         </span>
-                       ) : (
-                         <span className="flex items-center justify-center gap-2">
-                           <svg className="w-4 h-4 text-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                           </svg>
-                           Voice Input
-                         </span>
-                       )}
+                       <div className="flex items-center justify-center gap-3">
+                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                         </svg>
+                         Chat Mode
+                       </div>
+                       <span className="text-xs opacity-75 mt-1 block">Type your questions</span>
                      </button>
-                     
                      <button
-                       onClick={() => {
-                         if (recognition && isListening) {
-                           recognition.stop();
-                         }
-                       }}
-                       disabled={!isListening}
-                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
+                       onClick={() => selectInteractionMode('audio')}
+                       className="bg-gold-shiny text-navy px-6 py-4 rounded-xl font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform"
                      >
-                       Stop
+                       <div className="flex items-center justify-center gap-3">
+                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                         </svg>
+                         Audio Mode
+                       </div>
+                       <span className="text-xs opacity-75 mt-1 block">Speak naturally</span>
                      </button>
                    </div>
                  )}
-                 
-                 {/* Audio Response Buttons */}
-                 {response && (
-                   <div className="flex gap-3">
-                     <button
-                       onClick={speakResponse}
-                       disabled={isSpeaking}
-                       className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 ${
-                         isSpeaking 
-                           ? 'bg-red-500 text-white animate-pulse' 
-                           : 'bg-gold-shiny text-navy hover:scale-105'
-                       }`}
-                     >
-                       {isSpeaking ? (
-                         <span className="flex items-center justify-center gap-2">
-                           <div className="w-2 h-2 bg-navy rounded-full animate-bounce"></div>
-                           Speaking...
-                         </span>
-                       ) : (
-                         <span className="flex items-center justify-center gap-2">
-                           <svg className="w-4 h-4 text-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828.001a6.977 6.977 0 010-9.899m-9.899 0a6.977 6.977 0 010 9.899m2.828-9.899a5 5 0 010 7.072" />
-                           </svg>
-                           Audio Response
-                         </span>
-                       )}
-                     </button>
-                     
-                     <button
-                       onClick={stopSpeaking}
-                       disabled={!isSpeaking}
-                       className="px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
-                     >
-                       Stop
-                     </button>
+
+                 {/* Chat Mode Interface */}
+                 {interactionMode === 'chat' && (
+                   <div className="space-y-4">
+                     <div className="flex gap-3">
+                       <input
+                         type="text"
+                         value={inputText}
+                         onChange={(e) => setInputText(e.target.value)}
+                         onKeyPress={(e) => e.key === 'Enter' && sendConsultationQuery()}
+                         placeholder="Ask your strategic question..."
+                         className="flex-1 bg-white/10 border border-gold-shiny/30 rounded-xl px-4 py-3 text-white placeholder-blue-300/50 text-sm focus:outline-none focus:border-gold-shiny transition-colors"
+                       />
+                       <button
+                         onClick={sendConsultationQuery}
+                         className="bg-gold-shiny text-navy px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-transform"
+                       >
+                         Send
+                       </button>
+                     </div>
+                   </div>
+                 )}
+
+                 {/* Audio Mode Interface */}
+                 {interactionMode === 'audio' && (
+                   <div className="space-y-4">
+                     <div className="flex gap-3">
+                       <button
+                         onClick={startVoiceInput}
+                         disabled={isListening}
+                         className={`flex-1 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all duration-300 ${
+                           isListening 
+                             ? 'bg-red-500 text-white animate-pulse' 
+                             : 'bg-gold-shiny text-navy hover:scale-105'
+                         }`}
+                       >
+                         {isListening ? (
+                           <span className="flex items-center justify-center gap-2">
+                             <div className="w-3 h-3 bg-navy rounded-full animate-bounce"></div>
+                             Listening...
+                           </span>
+                         ) : (
+                           <span className="flex items-center justify-center gap-2">
+                             <svg className="w-5 h-5 text-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                             </svg>
+                             Speak Now
+                           </span>
+                         )}
+                       </button>
+                       
+                       <button
+                         onClick={() => {
+                           if (recognition && isListening) {
+                             recognition.stop();
+                           }
+                         }}
+                         disabled={!isListening}
+                         className="px-6 py-4 rounded-xl font-black text-sm uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed transition-transform"
+                       >
+                         Stop
+                       </button>
+                     </div>
+                     <p className="text-blue-200/50 text-xs text-center">
+                       Speak naturally. Your response will be automatically spoken back.
+                     </p>
                    </div>
                  )}
                  
@@ -501,7 +575,7 @@ const AIAdvisor = () => {
                      onClick={requestEmailCopy}
                      className="w-full py-3 rounded-xl font-black text-xs uppercase tracking-widest bg-gold-shiny text-navy hover:scale-105 transition-transform"
                    >
-                     Request Email Copy
+                     End Session & Get Summary
                    </button>
                  )}
                  
